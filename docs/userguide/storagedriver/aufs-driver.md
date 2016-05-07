@@ -101,9 +101,9 @@ Use the following command to determine if your system supports AUFS.
 
 This output indicates the system supports AUFS. Once you've verified your
 system supports AUFS, you can must instruct the Docker daemon to use it. You do
-this from the command line with the `docker daemon` command:
+this from the command line with the `dockerd` command:
 
-    $ sudo docker daemon --storage-driver=aufs &
+    $ sudo dockerd --storage-driver=aufs &
 
 
 Alternatively, you can edit the Docker config file and add the
@@ -131,7 +131,7 @@ driver on top of an existing `ext4` backing filesystem.
 
 ## Local storage and AUFS
 
-As the `docker daemon` runs with the AUFS driver, the driver stores images and
+As the `dockerd` runs with the AUFS driver, the driver stores images and
 containers within the Docker host's local storage area under
 `/var/lib/docker/aufs/`.
 
@@ -148,7 +148,7 @@ layer IDs). Inside each file are the names of the directories that exist below
 it in the stack
 
 The command below shows the contents of a metadata file in
-`/var/lib/docker/aufs/layers/` that lists the the three directories that are
+`/var/lib/docker/aufs/layers/` that lists the three directories that are
 stacked below it in the union mount. Remember, these directory names do no map
 to image layer IDs with Docker 1.10 and higher.
 

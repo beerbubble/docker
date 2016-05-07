@@ -170,6 +170,9 @@ func (is *store) Search(term string) (ID, error) {
 
 	dgst, err := is.digestSet.Lookup(term)
 	if err != nil {
+		if err == digest.ErrDigestNotFound {
+			err = fmt.Errorf("No such image: %s", term)
+		}
 		return "", err
 	}
 	return ID(dgst), nil
@@ -230,6 +233,9 @@ func (is *store) SetParent(id, parent ID) error {
 	parentMeta := is.images[parent]
 	if parentMeta == nil {
 		return fmt.Errorf("unknown parent image ID %s", parent.String())
+	}
+	if parent, err := is.GetParent(id); err == nil && is.images[parent] != nil {
+		delete(is.images[parent].children, id)
 	}
 	parentMeta.children[id] = struct{}{}
 	return is.fs.SetMetadata(id, "parent", []byte(parent))

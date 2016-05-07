@@ -42,7 +42,7 @@ image.
 
 Docker 1.10 introduced a new content addressable storage model. This is a 
 completely new way to address image and layer data on disk. Previously, image 
-and layer data was referenced and stored using a a randomly generated UUID. In 
+and layer data was referenced and stored using a randomly generated UUID. In 
 the new model this is replaced by a secure *content hash*.
 
 The new model improves security, provides a built-in way to avoid ID 
@@ -70,7 +70,7 @@ first time you start an updated Docker daemon. After the migration is complete,
  all images and tags will have brand new secure IDs. 
 
 Although the migration is automatic and transparent, it is computationally 
-intensive. This means it and can take time if you have lots of image data. 
+intensive. This means it can take time if you have lots of image data.
 During this time your Docker daemon will not respond to other requests.
 
 A migration tool exists that allows you to migrate existing images to the new 
@@ -110,7 +110,7 @@ single 8GB general purpose SSD EBS volume. The Docker data directory
     centos              latest              c8a648134623        4 weeks ago         196.6 MB
     ubuntu              15.04               c8be1ac8145a        7 weeks ago         131.3 MB
     
-    $ du -hs /var/lib/docker
+    $ sudo du -hs /var/lib/docker
     2.0G    /var/lib/docker
     
     $ time docker run --rm -v /var/lib/docker:/var/lib/docker docker/v1.10-migrator
@@ -275,12 +275,12 @@ image that you just pulled, make a change to it, and build a new image based on
 command.
 
 1. In an empty directory, create a simple `Dockerfile` that starts with the 
-2. ubuntu:15.04 image.
+   ubuntu:15.04 image.
 
         FROM ubuntu:15.04
 
 2. Add a new file called "newfile" in the image's `/tmp` directory with the 
-3. text "Hello world" in it.
+   text "Hello world" in it.
 
     When you are done, the `Dockerfile` contains two lines:
 
@@ -291,7 +291,7 @@ command.
 3. Save and close the file.
 
 4. From a terminal in the same folder as your `Dockerfile`, run the following 
-5. command:
+   command:
 
         $ docker build -t changed-ubuntu .
         Sending build context to Docker daemon 2.048 kB
@@ -310,14 +310,14 @@ command.
     The output above shows a new image with image ID `94e6b7d2c720`.
 
 5. Run the `docker images` command to verify the new `changed-ubuntu` image is 
-6. in the Docker host's local storage area.
+   in the Docker host's local storage area.
 
         REPOSITORY       TAG      IMAGE ID       CREATED           SIZE
         changed-ubuntu   latest   03b964f68d06   33 seconds ago    131.4 MB
         ubuntu           15.04    013f3d01d247   6 weeks ago       131.3 MB
 
 6. Run the `docker history` command to see which image layers were used to 
-7. create the new `changed-ubuntu` image.
+   create the new `changed-ubuntu` image.
 
         $ docker history changed-ubuntu
         IMAGE               CREATED              CREATED BY                                      SIZE        COMMENT

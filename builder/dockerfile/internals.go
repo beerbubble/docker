@@ -6,6 +6,7 @@ package dockerfile
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -16,10 +17,11 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Sirupsen/logrus"
-	"github.com/docker/docker/api"
+	"github.com/docker/docker/api/types/backend"
 	"github.com/docker/docker/builder"
 	"github.com/docker/docker/builder/dockerfile/parser"
 	"github.com/docker/docker/pkg/archive"
@@ -38,7 +40,7 @@ import (
 	"github.com/docker/engine-api/types/strslice"
 )
 
-func (b *Builder) commit(id string, autoCmd *strslice.StrSlice, comment string) error {
+func (b *Builder) commit(id string, autoCmd strslice.StrSlice, comment string) error {
 	if b.disableCommit {
 		return nil
 	}
@@ -46,14 +48,15 @@ func (b *Builder) commit(id string, autoCmd *strslice.StrSlice, comment string) 
 		return fmt.Errorf("Please provide a source image with `from` prior to commit")
 	}
 	b.runConfig.Image = b.image
+
 	if id == "" {
 		cmd := b.runConfig.Cmd
 		if runtime.GOOS != "windows" {
-			b.runConfig.Cmd = strslice.New("/bin/sh", "-c", "#(nop) "+comment)
+			b.runConfig.Cmd = strslice.StrSlice{"/bin/sh", "-c", "#(nop) " + comment}
 		} else {
-			b.runConfig.Cmd = strslice.New("cmd", "/S /C", "REM (nop) "+comment)
+			b.runConfig.Cmd = strslice.StrSlice{"cmd", "/S /C", "REM (nop) " + comment}
 		}
-		defer func(cmd *strslice.StrSlice) { b.runConfig.Cmd = cmd }(cmd)
+		defer func(cmd strslice.StrSlice) { b.runConfig.Cmd = cmd }(cmd)
 
 		hit, err := b.probeCache()
 		if err != nil {
@@ -71,10 +74,12 @@ func (b *Builder) commit(id string, autoCmd *strslice.StrSlice, comment string) 
 	autoConfig := *b.runConfig
 	autoConfig.Cmd = autoCmd
 
-	commitCfg := &types.ContainerCommitConfig{
-		Author: b.maintainer,
-		Pause:  true,
-		Config: &autoConfig,
+	commitCfg := &backend.ContainerCommitConfig{
+		ContainerCommitConfig: types.ContainerCommitConfig{
+			Author: b.maintainer,
+			Pause:  true,
+			Config: &autoConfig,
+		},
 	}
 
 	// Commit the container
@@ -82,6 +87,7 @@ func (b *Builder) commit(id string, autoCmd *strslice.StrSlice, comment string) 
 	if err != nil {
 		return err
 	}
+
 	b.image = imageID
 	return nil
 }
@@ -172,11 +178,11 @@ func (b *Builder) runContextCommand(args []string, allowRemote bool, allowLocalD
 
 	cmd := b.runConfig.Cmd
 	if runtime.GOOS != "windows" {
-		b.runConfig.Cmd = strslice.New("/bin/sh", "-c", fmt.Sprintf("#(nop) %s %s in %s", cmdName, srcHash, dest))
+		b.runConfig.Cmd = strslice.StrSlice{"/bin/sh", "-c", fmt.Sprintf("#(nop) %s %s in %s", cmdName, srcHash, dest)}
 	} else {
-		b.runConfig.Cmd = strslice.New("cmd", "/S", "/C", fmt.Sprintf("REM (nop) %s %s in %s", cmdName, srcHash, dest))
+		b.runConfig.Cmd = strslice.StrSlice{"cmd", "/S", "/C", fmt.Sprintf("REM (nop) %s %s in %s", cmdName, srcHash, dest)}
 	}
-	defer func(cmd *strslice.StrSlice) { b.runConfig.Cmd = cmd }(cmd)
+	defer func(cmd strslice.StrSlice) { b.runConfig.Cmd = cmd }(cmd)
 
 	if hit, err := b.probeCache(); err != nil {
 		return err
@@ -194,13 +200,59 @@ func (b *Builder) runContextCommand(args []string, allowRemote bool, allowLocalD
 
 	// Twiddle the destination when its a relative path - meaning, make it
 	// relative to the WORKINGDIR
-	if !system.IsAbs(dest) {
-		hasSlash := strings.HasSuffix(dest, string(os.PathSeparator))
-		dest = filepath.Join(string(os.PathSeparator), filepath.FromSlash(b.runConfig.WorkingDir), dest)
 
-		// Make sure we preserve any trailing slash
-		if hasSlash {
-			dest += string(os.PathSeparator)
+	endsInSlash := strings.HasSuffix(dest, string(os.PathSeparator))
+
+	if runtime.GOOS == "windows" {
+		// On Windows, this is more complicated. We are guaranteed that the
+		// WorkingDir is already platform consistent meaning in the format
+		// UPPERCASEDriveLetter-Colon-Backslash-Foldername. However, Windows
+		// for now also has the limitation that ADD/COPY can only be done to
+		// the C: (system) drive, not any drives that might be present as a
+		// result of bind mounts.
+		//
+		// So... if the path specified is Linux-style absolute (/foo or \\foo),
+		// we assume it is the system drive. If it is a Windows-style absolute
+		// (DRIVE:\\foo), error if DRIVE is not C. And finally, ensure we
+		// strip any configured working directories drive letter so that it
+		// can be subsequently legitimately converted to a Windows volume-style
+		// pathname.
+
+		// Not a typo - filepath.IsAbs, not system.IsAbs on this next check as
+		// we only want to validate where the DriveColon part has been supplied.
+		if filepath.IsAbs(dest) {
+			if strings.ToUpper(string(dest[0])) != "C" {
+				return fmt.Errorf("Windows does not support %s with a destinations not on the system drive (C:)", cmdName)
+			}
+			dest = dest[2:] // Strip the drive letter
+		}
+
+		// Cannot handle relative where WorkingDir is not the system drive.
+		if len(b.runConfig.WorkingDir) > 0 {
+			if !system.IsAbs(b.runConfig.WorkingDir[2:]) {
+				return fmt.Errorf("Current WorkingDir %s is not platform consistent", b.runConfig.WorkingDir)
+			}
+			if !system.IsAbs(dest) {
+				if string(b.runConfig.WorkingDir[0]) != "C" {
+					return fmt.Errorf("Windows does not support %s with relative paths when WORKDIR is not the system drive", cmdName)
+				}
+
+				dest = filepath.Join(string(os.PathSeparator), b.runConfig.WorkingDir[2:], dest)
+
+				// Make sure we preserve any trailing slash
+				if endsInSlash {
+					dest += string(os.PathSeparator)
+				}
+			}
+		}
+	} else {
+		if !system.IsAbs(dest) {
+			dest = filepath.Join(string(os.PathSeparator), filepath.FromSlash(b.runConfig.WorkingDir), dest)
+
+			// Make sure we preserve any trailing slash
+			if endsInSlash {
+				dest += string(os.PathSeparator)
+			}
 		}
 	}
 
@@ -506,7 +558,7 @@ func (b *Builder) create() (string, error) {
 
 	// TODO: why not embed a hostconfig in builder?
 	hostConfig := &container.HostConfig{
-		Isolation: b.options.IsolationLevel,
+		Isolation: b.options.Isolation,
 		ShmSize:   b.options.ShmSize,
 		Resources: resources,
 	}
@@ -528,31 +580,36 @@ func (b *Builder) create() (string, error) {
 	b.tmpContainers[c.ID] = struct{}{}
 	fmt.Fprintf(b.Stdout, " ---> Running in %s\n", stringid.TruncateID(c.ID))
 
-	if config.Cmd.Len() > 0 {
-		// override the entry point that may have been picked up from the base image
-		if err := b.docker.ContainerUpdateCmdOnBuild(c.ID, config.Cmd.Slice()); err != nil {
-			return "", err
-		}
+	// override the entry point that may have been picked up from the base image
+	if err := b.docker.ContainerUpdateCmdOnBuild(c.ID, config.Cmd); err != nil {
+		return "", err
 	}
 
 	return c.ID, nil
 }
 
+var errCancelled = errors.New("build cancelled")
+
 func (b *Builder) run(cID string) (err error) {
 	errCh := make(chan error)
 	go func() {
-		errCh <- b.docker.ContainerAttachOnBuild(cID, nil, b.Stdout, b.Stderr, true)
+		errCh <- b.docker.ContainerAttachRaw(cID, nil, b.Stdout, b.Stderr, true)
 	}()
 
 	finished := make(chan struct{})
-	defer close(finished)
+	var once sync.Once
+	finish := func() { close(finished) }
+	cancelErrCh := make(chan error, 1)
+	defer once.Do(finish)
 	go func() {
 		select {
-		case <-b.cancelled:
+		case <-b.clientCtx.Done():
 			logrus.Debugln("Build cancelled, killing and removing container:", cID)
 			b.docker.ContainerKill(cID, 0)
 			b.removeContainer(cID)
+			cancelErrCh <- errCancelled
 		case <-finished:
+			cancelErrCh <- nil
 		}
 	}()
 
@@ -568,12 +625,12 @@ func (b *Builder) run(cID string) (err error) {
 	if ret, _ := b.docker.ContainerWait(cID, -1); ret != 0 {
 		// TODO: change error type, because jsonmessage.JSONError assumes HTTP
 		return &jsonmessage.JSONError{
-			Message: fmt.Sprintf("The command '%s' returned a non-zero code: %d", b.runConfig.Cmd.ToString(), ret),
+			Message: fmt.Sprintf("The command '%s' returned a non-zero code: %d", strings.Join(b.runConfig.Cmd, " "), ret),
 			Code:    ret,
 		}
 	}
-
-	return nil
+	once.Do(finish)
+	return <-cancelErrCh
 }
 
 func (b *Builder) removeContainer(c string) error {
@@ -604,7 +661,7 @@ func (b *Builder) readDockerfile() error {
 	// that then look for 'dockerfile'.  If neither are found then default
 	// back to 'Dockerfile' and use that in the error message.
 	if b.options.Dockerfile == "" {
-		b.options.Dockerfile = api.DefaultDockerfileName
+		b.options.Dockerfile = builder.DefaultDockerfileName
 		if _, _, err := b.context.Stat(b.options.Dockerfile); os.IsNotExist(err) {
 			lowercase := strings.ToLower(b.options.Dockerfile)
 			if _, _, err := b.context.Stat(lowercase); err == nil {

@@ -9,8 +9,10 @@ import (
 	"runtime"
 
 	"github.com/docker/docker/api"
-	"github.com/docker/docker/cli"
+	cliflags "github.com/docker/docker/cli/flags"
 	"github.com/docker/docker/cliconfig"
+	"github.com/docker/docker/cliconfig/configfile"
+	"github.com/docker/docker/cliconfig/credentials"
 	"github.com/docker/docker/dockerversion"
 	"github.com/docker/docker/opts"
 	"github.com/docker/docker/pkg/term"
@@ -26,7 +28,7 @@ type DockerCli struct {
 	init func() error
 
 	// configFile has the client configuration file
-	configFile *cliconfig.ConfigFile
+	configFile *configfile.ConfigFile
 	// in holds the input stream and closer (io.ReadCloser) for the client.
 	in io.ReadCloser
 	// out holds the output stream (io.Writer) for the client.
@@ -111,7 +113,7 @@ func (cli *DockerCli) restoreTerminal(in io.Closer) error {
 // The key file, protocol (i.e. unix) and address are passed in as strings, along with the tls.Config. If the tls.Config
 // is set the client scheme will be set to https.
 // The client will be given a 32-second timeout (see https://github.com/docker/docker/pull/8035).
-func NewDockerCli(in io.ReadCloser, out, err io.Writer, clientFlags *cli.ClientFlags) *DockerCli {
+func NewDockerCli(in io.ReadCloser, out, err io.Writer, clientFlags *cliflags.ClientFlags) *DockerCli {
 	cli := &DockerCli{
 		in:      in,
 		out:     out,
@@ -125,6 +127,9 @@ func NewDockerCli(in io.ReadCloser, out, err io.Writer, clientFlags *cli.ClientF
 		if e != nil {
 			fmt.Fprintf(cli.err, "WARNING: Error loading config file:%v\n", e)
 		}
+		if !configFile.ContainsAuth() {
+			credentials.DetectDefaultStore(configFile)
+		}
 		cli.configFile = configFile
 
 		host, err := getServerHost(clientFlags.Common.Hosts, clientFlags.Common.TLSOptions)
@@ -136,9 +141,9 @@ func NewDockerCli(in io.ReadCloser, out, err io.Writer, clientFlags *cli.ClientF
 		if customHeaders == nil {
 			customHeaders = map[string]string{}
 		}
-		customHeaders["User-Agent"] = "Docker-Client/" + dockerversion.Version + " (" + runtime.GOOS + ")"
+		customHeaders["User-Agent"] = clientUserAgent()
 
-		verStr := api.DefaultVersion.String()
+		verStr := api.DefaultVersion
 		if tmpStr := os.Getenv("DOCKER_API_VERSION"); tmpStr != "" {
 			verStr = tmpStr
 		}
@@ -204,4 +209,8 @@ func newHTTPClient(host string, tlsOptions *tlsconfig.Options) (*http.Client, er
 	return &http.Client{
 		Transport: tr,
 	}, nil
+}
+
+func clientUserAgent() string {
+	return "Docker-Client/" + dockerversion.Version + " (" + runtime.GOOS + ")"
 }

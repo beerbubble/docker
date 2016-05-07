@@ -127,7 +127,7 @@ func splitCpArg(arg string) (container, path string) {
 }
 
 func (cli *DockerCli) statContainerPath(containerName, path string) (types.ContainerPathStat, error) {
-	return cli.client.ContainerStatPath(containerName, path)
+	return cli.client.ContainerStatPath(context.Background(), containerName, path)
 }
 
 func resolveLocalPath(localPath string) (absPath string, err error) {
@@ -288,11 +288,8 @@ func (cli *DockerCli) copyToContainer(srcPath, dstContainer, dstPath string, cpP
 	}
 
 	options := types.CopyToContainerOptions{
-		ContainerID:               dstContainer,
-		Path:                      resolvedDstPath,
-		Content:                   content,
 		AllowOverwriteDirWithFile: false,
 	}
 
-	return cli.client.CopyToContainer(context.Background(), options)
+	return cli.client.CopyToContainer(context.Background(), dstContainer, resolvedDstPath, content, options)
 }

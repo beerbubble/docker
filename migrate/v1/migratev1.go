@@ -19,6 +19,7 @@ import (
 	"github.com/docker/docker/image"
 	imagev1 "github.com/docker/docker/image/v1"
 	"github.com/docker/docker/layer"
+	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/docker/reference"
 )
 
@@ -160,7 +161,7 @@ func calculateLayerChecksum(graphDir, id string, ls checksumCalculator) error {
 		return err
 	}
 
-	if err := ioutil.WriteFile(filepath.Join(graphDir, id, migrationDiffIDFileName), []byte(diffID), 0600); err != nil {
+	if err := ioutils.AtomicWriteFile(filepath.Join(graphDir, id, migrationDiffIDFileName), []byte(diffID), 0600); err != nil {
 		return err
 	}
 
@@ -282,7 +283,8 @@ func migrateContainers(root string, ls graphIDMounter, is image.Store, imageMapp
 		}
 
 		if err := ls.CreateRWLayerByGraphID(id, id, img.RootFS.ChainID()); err != nil {
-			return err
+			logrus.Errorf("migrate container error: %v", err)
+			continue
 		}
 
 		logrus.Infof("migrated container %s to point to %s", id, imageID)
@@ -422,7 +424,11 @@ func migrateImage(id, root string, ls graphIDRegistrar, is image.Store, ms metad
 		history = parentImg.History
 	}
 
-	diffID, err := ioutil.ReadFile(filepath.Join(root, graphDirName, id, migrationDiffIDFileName))
+	diffIDData, err := ioutil.ReadFile(filepath.Join(root, graphDirName, id, migrationDiffIDFileName))
+	if err != nil {
+		return err
+	}
+	diffID, err := digest.ParseDigest(string(diffIDData))
 	if err != nil {
 		return err
 	}

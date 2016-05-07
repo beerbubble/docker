@@ -133,11 +133,11 @@ you should substitute your own values throughout the procedure.
 
 1. If it is running, stop the Docker `daemon`.
 
-1. Install `the software-properties-common` package.
+1. Install the `software-properties-common` package.
 
     This is required for the `add-apt-repository` command.
 
-        $ sudo apt-get install software-properties-common
+        $ sudo apt-get install -y software-properties-common
         Reading package lists... Done
         Building dependency tree
         <output truncated>
@@ -222,7 +222,7 @@ Once ZFS is installed and loaded, you're ready to configure ZFS for Docker.
     The procedure for starting the Docker daemon may differ depending on the
     Linux distribution you are using. It is possible to force the Docker daemon
     to start with the `zfs` storage driver by passing the 
-    `--storage-driver=zfs`flag to the `docker daemon` command, or to the 
+    `--storage-driver=zfs`flag to the `dockerd` command, or to the 
     `DOCKER_OPTS` line in the Docker config file.
 
 6. Verify that the daemon is using the `zfs` storage driver.

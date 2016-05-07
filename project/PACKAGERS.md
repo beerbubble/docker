@@ -44,7 +44,8 @@ need to package Docker your way, without denaturing it in the process.
 To build Docker, you will need the following:
 
 * A recent version of Git and Mercurial
-* Go version 1.4 or later
+* Go version 1.4 or later (Go version 1.5 or later required for hardware signing
+  support in Docker Content Trust)
 * A clean checkout of the source added to a valid [Go
   workspace](https://golang.org/doc/code.html#Workspaces) under the path
   *src/github.com/docker/docker* (unless you plan to use `AUTO_GOPATH`,
@@ -59,7 +60,6 @@ To build the Docker daemon, you will additionally need:
 * btrfs-progs version 3.16.1 or later (unless using an older version is
   absolutely necessary, in which case 3.8 is the minimum)
 * libseccomp version 2.2.1 or later (for build tag seccomp)
-* yubico-piv-tool version 1.1.0 or later (for experimental)
 
 Be sure to also check out Docker's Dockerfile for the most up-to-date list of
 these build-time dependencies.
@@ -163,6 +163,12 @@ SELinux, you will need to use the `selinux` build tag:
 export DOCKER_BUILDTAGS='selinux'
 ```
 
+If you're building a binary that may need to be used on platforms that include
+seccomp, you will need to use the `seccomp` build tag:
+```bash
+export DOCKER_BUILDTAGS='seccomp'
+```
+
 There are build tags for disabling graphdrivers as well. By default, support
 for all graphdrivers are built in.
 
@@ -210,10 +216,10 @@ the file "./VERSION". This binary is usually installed somewhere like
 
 ### Dynamic Daemon / Client-only Binary
 
-If you are only interested in a Docker client binary, set `DOCKER_CLIENTONLY` to a non-empty value using something similar to the following:
+If you are only interested in a Docker client binary, you can build using:
 
 ```bash
-export DOCKER_CLIENTONLY=1
+./hack/make.sh binary-client
 ```
 
 If you need to (due to distro policy, distro library availability, or for other
@@ -222,10 +228,10 @@ interested in creating a client binary for Docker, use something similar to the
 following:
 
 ```bash
-./hack/make.sh dynbinary
+./hack/make.sh dynbinary-client
 ```
 
-This will create "./bundles/$VERSION/dynbinary/docker-$VERSION", which for
+This will create "./bundles/$VERSION/dynbinary-client/docker-$VERSION", which for
 client-only builds is the important file to grab and install as appropriate.
 
 ## System Dependencies

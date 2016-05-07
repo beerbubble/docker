@@ -116,8 +116,7 @@ func (s *DockerSuite) TestUpdateContainerWithoutFlags(c *check.C) {
 }
 
 func (s *DockerSuite) TestUpdateKernelMemory(c *check.C) {
-	testRequires(c, DaemonIsLinux)
-	testRequires(c, kernelMemorySupport)
+	testRequires(c, DaemonIsLinux, kernelMemorySupport)
 
 	name := "test-update-container"
 	dockerCmd(c, "run", "-d", "--name", name, "--kernel-memory", "50M", "busybox", "top")
@@ -128,6 +127,12 @@ func (s *DockerSuite) TestUpdateKernelMemory(c *check.C) {
 	// Update kernel memory to a running container with failure should not change HostConfig
 	c.Assert(inspectField(c, name, "HostConfig.KernelMemory"), checker.Equals, "52428800")
 
+	dockerCmd(c, "pause", name)
+	_, _, err = dockerCmdWithError("update", "--kernel-memory", "100M", name)
+	c.Assert(err, check.NotNil)
+	c.Assert(inspectField(c, name, "HostConfig.KernelMemory"), checker.Equals, "52428800")
+	dockerCmd(c, "unpause", name)
+
 	dockerCmd(c, "stop", name)
 	dockerCmd(c, "update", "--kernel-memory", "100M", name)
 	dockerCmd(c, "start", name)
@@ -137,6 +142,47 @@ func (s *DockerSuite) TestUpdateKernelMemory(c *check.C) {
 	file := "/sys/fs/cgroup/memory/memory.kmem.limit_in_bytes"
 	out, _ := dockerCmd(c, "exec", name, "cat", file)
 	c.Assert(strings.TrimSpace(out), checker.Equals, "104857600")
+}
+
+func (s *DockerSuite) TestUpdateSwapMemoryOnly(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+	testRequires(c, memoryLimitSupport)
+	testRequires(c, swapMemorySupport)
+
+	name := "test-update-container"
+	dockerCmd(c, "run", "-d", "--name", name, "--memory", "300M", "--memory-swap", "500M", "busybox", "top")
+	dockerCmd(c, "update", "--memory-swap", "600M", name)
+
+	c.Assert(inspectField(c, name, "HostConfig.MemorySwap"), checker.Equals, "629145600")
+
+	file := "/sys/fs/cgroup/memory/memory.memsw.limit_in_bytes"
+	out, _ := dockerCmd(c, "exec", name, "cat", file)
+	c.Assert(strings.TrimSpace(out), checker.Equals, "629145600")
+}
+
+func (s *DockerSuite) TestUpdateInvalidSwapMemory(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+	testRequires(c, memoryLimitSupport)
+	testRequires(c, swapMemorySupport)
+
+	name := "test-update-container"
+	dockerCmd(c, "run", "-d", "--name", name, "--memory", "300M", "--memory-swap", "500M", "busybox", "top")
+	_, _, err := dockerCmdWithError("update", "--memory-swap", "200M", name)
+	// Update invalid swap memory should fail.
+	// This will pass docker config validation, but failed at kernel validation
+	c.Assert(err, check.NotNil)
+
+	// Update invalid swap memory with failure should not change HostConfig
+	c.Assert(inspectField(c, name, "HostConfig.Memory"), checker.Equals, "314572800")
+	c.Assert(inspectField(c, name, "HostConfig.MemorySwap"), checker.Equals, "524288000")
+
+	dockerCmd(c, "update", "--memory-swap", "600M", name)
+
+	c.Assert(inspectField(c, name, "HostConfig.MemorySwap"), checker.Equals, "629145600")
+
+	file := "/sys/fs/cgroup/memory/memory.memsw.limit_in_bytes"
+	out, _ := dockerCmd(c, "exec", name, "cat", file)
+	c.Assert(strings.TrimSpace(out), checker.Equals, "629145600")
 }
 
 func (s *DockerSuite) TestUpdateStats(c *check.C) {
